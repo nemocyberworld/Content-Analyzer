@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Universal Content Analyzer 🔍</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-6 flex flex-col items-center">
+
+  <h1 class="text-3xl font-bold mb-6 text-center">Universal Content Analyzer 🔍</h1>
+
+  <div class="w-full max-w-4xl">
+
+    <div class="mb-6">
+      <label for="fileInput" class="block mb-2 font-semibold cursor-pointer text-gray-300">
+        Upload files (HTML, PHP, JS, ASP, ENV, TXT, etc; multiple allowed):
+      </label>
+      <input
+        type="file"
+        id="fileInput"
+        multiple
+        accept="*/*"
+        class="block w-full text-gray-200 bg-gray-800 border border-gray-600 rounded px-3 py-2 cursor-pointer"
+      />
+      <p class="text-xs text-gray-500 mt-1">Max 5MB per file recommended.</p>
+    </div>
+
+    <div class="mb-6">
+      <label for="contentInput" class="block mb-2 font-semibold text-gray-300">Or paste content here:</label>
+      <textarea
+        id="contentInput"
+        rows="12"
+        placeholder="Paste content here if you don't upload files..."
+        class="w-full bg-gray-800 border border-gray-600 rounded p-3 text-sm text-white font-mono resize-y"
+      ></textarea>
+    </div>
+
+    <div class="flex gap-4 mb-6 max-w-5xl mx-auto flex-wrap justify-center">
+      <button
+        id="analyzeBtn"
+        aria-label="Analyze content"
+        class="bg-green-600 hover:bg-green-700 px-6 py-2 rounded font-semibold flex-1 min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Analyze
+      </button>
+      <button
+        id="clearBtn"
+        aria-label="Clear input and results"
+        class="bg-red-600 hover:bg-red-700 px-6 py-2 rounded font-semibold flex-1 min-w-[120px]"
+      >
+        Clear
+      </button>
+      <button
+        id="saveProgressBtn"
+        aria-label="Save progress"
+        class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-semibold flex-1 min-w-[120px]"
+      >
+        Save Progress
+      </button>
+      <button
+        id="loadProgressBtn"
+        aria-label="Load progress"
+        class="bg-yellow-600 hover:bg-yellow-700 px-6 py-2 rounded font-semibold flex-1 min-w-[120px]"
+      >
+        Load Progress
+      </button>
+      <button
+        id="exportProgressBtn"
+        aria-label="Export progress"
+        class="bg-indigo-600 hover:bg-indigo-700 px-6 py-2 rounded font-semibold flex-1 min-w-[120px]"
+      >
+        Export Progress
+      </button>
+      <button
+        id="resetProgressBtn"
+        aria-label="Reset progress"
+        class="bg-gray-600 hover:bg-gray-700 px-6 py-2 rounded font-semibold flex-1 min-w-[120px]"
+      >
+        Reset Progress
+      </button>
+    </div>
+
+    <div id="results" class="space-y-8 max-h-[600px] overflow-y-auto"></div>
+  </div>
+
+  <script>
+    // Secret regex patterns to detect keys, tokens, passwords, etc.
+    const secretPatterns = [
+  {name: 'AWS Access Key ID', regex: /AKIA[0-9A-Z]{16}/g},
+  {name: 'AWS Secret Access Key', regex: /(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])/g},
+  {name: 'Google API Key', regex: /AIza[0-9A-Za-z-_]{35}/g},
+  {name: 'Private RSA Key Block', regex: /-----BEGIN PRIVATE KEY-----[^-]+-----END PRIVATE KEY-----/gs},
+  {name: 'Private RSA Key Block (RSA)', regex: /-----BEGIN RSA PRIVATE KEY-----[^-]+-----END RSA PRIVATE KEY-----/gs},
+  {name: 'Private EC Key Block', regex: /-----BEGIN EC PRIVATE KEY-----[^-]+-----END EC PRIVATE KEY-----/gs},
+  {name: 'SSH Private Key', regex: /-----BEGIN OPENSSH PRIVATE KEY-----[^-]+-----END OPENSSH PRIVATE KEY-----/gs},
+  {name: 'Slack Token', regex: /xox[baprs]-[0-9a-zA-Z]{10,48}/g},
+  {name: 'JWT Token', regex: /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g},
+  {name: 'Generic Secret Variable', regex: /secret\s*=\s*['"][^'"]{8,}['"]/gi},
+  {name: 'Generic API Key Variable', regex: /api_key\s*=\s*['"][^'"]{8,}['"]/gi},
+  {name: 'Generic Token Variable', regex: /token\s*=\s*['"][^'"]{8,}['"]/gi},
+  {name: 'Password Variable', regex: /password\s*=\s*['"][^'"]{6,}['"]/gi},
+  {name: 'Basic Auth Header', regex: /Basic\s+[A-Za-z0-9+\/=]{20,}/g},
+  {name: 'Facebook Access Token', regex: /EAACEdEose0cBA[0-9A-Za-z]+/g},
+  {name: 'Twitter Access Token', regex: /AAAAAAAAAAAAAAAAAAAAA%[0-9a-zA-Z]+/g},
+  {name: 'Stripe Secret Key', regex: /sk_live_[0-9a-zA-Z]{24}/g},
+  {name: 'Stripe Test Key', regex: /sk_test_[0-9a-zA-Z]{24}/g},
+  {name: 'Twilio Account SID', regex: /AC[0-9a-f]{32}/g},
+  {name: 'Twilio Auth Token', regex: /auth_token\s*=\s*['"][0-9a-f]{32}['"]/gi},
+  {name: 'SendGrid API Key', regex: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/g},
+  {name: 'GitHub Personal Access Token', regex: /ghp_[0-9a-zA-Z]{36}/g},
+  {name: 'Google OAuth Access Token', regex: /ya29\.[0-9A-Za-z\-_]+/g},
+  {name: 'Heroku API Key', regex: /[hH]eroku\.[0-9a-f]{32}/g},
+  {name: 'API Key in JSON', regex: /"api_key"\s*:\s*"[^"]{16,}"/gi},
+  {name: 'API Key in JS', regex: /apiKey\s*[:=]\s*['"][^'"]{16,}['"]/gi},
+  {name: 'Public RSA Key Block', regex: /-----BEGIN PUBLIC KEY-----[^-]+-----END PUBLIC KEY-----/gs},
+  {name: 'Firebase Database URL', regex: /https:\/\/[a-z0-9\-]+\.firebaseio\.com/g},
+  {name: 'Slack Webhook URL', regex: /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9\/]+/g},
+  {name: 'Base64 String >20 chars', regex: /['"][A-Za-z0-9+/=]{20,}['"]/g},
+  {name: 'OAuth Bearer Token', regex: /Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/g},
+  {name: 'DigitalOcean API Token', regex: /do_[0-9a-f]{64}/g},
+  {name: 'Mailgun API Key', regex: /key-[0-9a-z]{32}/g},
+  {name: 'Generic Bearer Token', regex: /bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/gi},
+  {name: 'Firebase API Key', regex: /AIza[0-9A-Za-z\-_]{35}/g},
+  {name: 'Facebook App Secret', regex: /facebook_app_secret\s*=\s*['"][0-9a-f]{32}['"]/gi},
+
+  // New entries added below:
+  {name: 'Azure Storage Account Key', regex: /DefaultEndpointsProtocol=https;AccountName=[a-z0-9]{3,24};AccountKey=[A-Za-z0-9+\/=]{88};EndpointSuffix=core.windows.net/g},
+  {name: 'Google Service Account JSON', regex: /"type":\s*"service_account"/g},
+  {name: 'AWS Session Token', regex: /FwoGZXIvYXdzE[A-Za-z0-9+/=]{50,}/g},
+  {name: 'Heroku OAuth Token', regex: /[hH]eroku-oauth-token:[A-Za-z0-9]{32,}/g},
+  {name: 'NPM Auth Token', regex: /\/\/registry\.npmjs\.org\/-\/user\/org\/npmjs\/token:[A-Za-z0-9-_]{40,}/g},
+  {name: 'Docker Hub Token', regex: /dockerhub\.com\/v2\/users\/[a-zA-Z0-9_-]+\/tokens\/[A-Za-z0-9-_]{20,}/g},
+  {name: 'Slack Bot User OAuth Access Token', regex: /xoxb-[0-9]{12}-[0-9]{12}-[a-zA-Z0-9]{24}/g},
+  {name: 'Facebook Page Access Token', regex: /EAAGm0PX4ZCpsBA[A-Za-z0-9]+/g},
+  {name: 'Google Cloud API Key', regex: /AIzaSy[A-Za-z0-9-_]{35}/g},
+  {name: 'Mailchimp API Key', regex: /[0-9a-f]{32}-us[0-9]{1,2}/g},
+  {name: 'Twilio API Key', regex: /SK[0-9a-f]{32}/g},
+  {name: 'Stripe Publishable Key', regex: /pk_live_[0-9a-zA-Z]{24}/g},
+  {name: 'Dropbox Access Token', regex: /sl\.[A-Za-z0-9-_]{64}/g},
+  {name: 'Box Access Token', regex: /BoxApi\/[A-Za-z0-9]{40,}/g},
+  {name: 'Bitbucket Access Token', regex: /x-token-auth:[A-Za-z0-9]{40,}/g},
+  {name: 'Facebook Client Token', regex: /[0-9a-f]{32}_[0-9a-f]{32}/g}
+];
+
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+    const STORAGE_KEY = 'universalContentAnalyzerProgress';
+
+    function analyzeSingleFile(filename, content, resultsDiv, fileType = '') {
+      const container = document.createElement('section');
+      container.className = 'bg-gray-800 rounded p-4 shadow-md';
+
+      const title = document.createElement('h2');
+      title.className = 'text-xl font-semibold mb-3 border-b border-gray-700 pb-1';
+      title.textContent = `File: ${filename}`;
+      if (fileType) title.textContent += ` (${fileType})`;
+      container.appendChild(title);
+
+      if (!content.trim()) {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.textContent = '⚠️ File is empty or whitespace only.';
+        emptyMsg.className = 'text-yellow-400';
+        container.appendChild(emptyMsg);
+        resultsDiv.appendChild(container);
+        return;
+      }
+
+      let foundAny = false;
+
+      for (const {name, regex} of secretPatterns) {
+        if (regex.global) regex.lastIndex = 0;
+
+        let match;
+        let matches = [];
+
+        while ((match = regex.exec(content)) !== null) {
+          matches.push(match[0]);
+          if (match.index === regex.lastIndex) regex.lastIndex++;
+        }
+
+        if (matches.length > 0) {
+          foundAny = true;
+          const patternDiv = document.createElement('div');
+          patternDiv.className = 'mb-3';
+
+          const patternTitle = document.createElement('h3');
+          patternTitle.className = 'text-lg font-semibold text-yellow-400';
+          patternTitle.textContent = name + ` (${matches.length} match${matches.length > 1 ? 'es' : ''})`;
+          patternDiv.appendChild(patternTitle);
+
+          const list = document.createElement('ul');
+          list.className = 'list-disc list-inside max-h-48 overflow-y-auto font-mono bg-gray-900 p-2 rounded text-xs whitespace-pre-wrap';
+
+          matches.forEach((m) => {
+            const item = document.createElement('li');
+            // Show first 60 chars with ellipsis if too long, escape HTML
+            const safeText = m.length > 60 ? m.slice(0, 60) + '...' : m;
+            item.textContent = safeText;
+            list.appendChild(item);
+          });
+
+          patternDiv.appendChild(list);
+          container.appendChild(patternDiv);
+        }
+      }
+
+      if (!foundAny) {
+        const none = document.createElement('p');
+        none.textContent = 'No secrets or suspicious patterns detected.';
+        none.className = 'text-green-400 font-semibold';
+        container.appendChild(none);
+      }
+
+      resultsDiv.appendChild(container);
+    }
+
+    function analyzeContent(inputContent, resultsDiv) {
+      resultsDiv.innerHTML = '';
+
+      analyzeSingleFile('Pasted Content', inputContent, resultsDiv);
+    }
+
+    function analyzeFiles(files, resultsDiv) {
+      resultsDiv.innerHTML = '';
+
+      if (files.length === 0) {
+        const p = document.createElement('p');
+        p.textContent = 'No files selected.';
+        resultsDiv.appendChild(p);
+        return;
+      }
+
+      Array.from(files).forEach((file) => {
+        if (file.size > MAX_FILE_SIZE) {
+          const container = document.createElement('section');
+          container.className = 'bg-gray-800 rounded p-4 shadow-md mb-4';
+          const title = document.createElement('h2');
+          title.className = 'text-xl font-semibold mb-3 border-b border-gray-700 pb-1';
+          title.textContent = `File: ${file.name}`;
+          container.appendChild(title);
+          const warn = document.createElement('p');
+          warn.className = 'text-red-500 font-semibold';
+          warn.textContent = '❌ File is too large (over 5MB), skipping.';
+          container.appendChild(warn);
+          resultsDiv.appendChild(container);
+          return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+          const content = e.target.result;
+          analyzeSingleFile(file.name, content, resultsDiv, file.type);
+        };
+
+        reader.onerror = () => {
+          const container = document.createElement('section');
+          container.className = 'bg-gray-800 rounded p-4 shadow-md mb-4';
+          const title = document.createElement('h2');
+          title.className = 'text-xl font-semibold mb-3 border-b border-gray-700 pb-1';
+          title.textContent = `File: ${file.name}`;
+          container.appendChild(title);
+          const err = document.createElement('p');
+          err.className = 'text-red-500 font-semibold';
+          err.textContent = '❌ Failed to read file.';
+          container.appendChild(err);
+          resultsDiv.appendChild(container);
+        };
+
+        reader.readAsText(file);
+      });
+    }
+
+    // Save progress to localStorage
+    function saveProgress() {
+      const filesInput = document.getElementById('fileInput');
+      const contentInput = document.getElementById('contentInput');
+      const resultsDiv = document.getElementById('results');
+
+      // We cannot save files to localStorage, so save only their names (and notify user)
+      // Save content textarea value and results HTML
+      const progress = {
+        contentText: contentInput.value,
+        resultsHTML: resultsDiv.innerHTML,
+        fileNames: Array.from(filesInput.files).map(f => f.name),
+        savedAt: new Date().toISOString()
+      };
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+      alert('Progress saved locally in your browser storage.');
+    }
+
+    // Load progress from localStorage
+    function loadProgress() {
+      const data = localStorage.getItem(STORAGE_KEY);
+      if (!data) {
+        alert('No saved progress found.');
+        return;
+      }
+      try {
+        const progress = JSON.parse(data);
+        const contentInput = document.getElementById('contentInput');
+        const resultsDiv = document.getElementById('results');
+        const fileInput = document.getElementById('fileInput');
+
+        contentInput.value = progress.contentText || '';
+        resultsDiv.innerHTML = progress.resultsHTML || '';
+
+        // Cannot restore files input (browser restriction)
+        if (progress.fileNames && progress.fileNames.length > 0) {
+          alert('Note: Files cannot be restored due to browser security. You need to re-upload files manually if needed:\n' + progress.fileNames.join(', '));
+        }
+      } catch (e) {
+        alert('Failed to load saved progress: ' + e.message);
+      }
+    }
+
+    // Export progress JSON as a file for backup or sharing
+    function exportProgress() {
+      const data = localStorage.getItem(STORAGE_KEY);
+      if (!data) {
+        alert('No saved progress found to export.');
+        return;
+      }
+      const blob = new Blob([data], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'universal_content_analyzer_progress.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Reset progress: clear localStorage and UI
+    function resetProgress() {
+      if (!confirm('Are you sure you want to reset all saved progress and clear inputs/results?')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      document.getElementById('contentInput').value = '';
+      document.getElementById('fileInput').value = '';
+      document.getElementById('results').innerHTML = '';
+      alert('Progress reset and inputs/results cleared.');
+    }
+
+    // Event listeners
+    document.getElementById('analyzeBtn').addEventListener('click', () => {
+      const filesInput = document.getElementById('fileInput');
+      const contentInput = document.getElementById('contentInput');
+      const resultsDiv = document.getElementById('results');
+
+      if (filesInput.files.length > 0) {
+        analyzeFiles(filesInput.files, resultsDiv);
+      } else if (contentInput.value.trim().length > 0) {
+        analyzeContent(contentInput.value, resultsDiv);
+      } else {
+        alert('Please upload files or paste content to analyze.');
+      }
+    });
+
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      if (confirm('Clear all inputs and results?')) {
+        document.getElementById('fileInput').value = '';
+        document.getElementById('contentInput').value = '';
+        document.getElementById('results').innerHTML = '';
+      }
+    });
+
+    document.getElementById('saveProgressBtn').addEventListener('click', saveProgress);
+    document.getElementById('loadProgressBtn').addEventListener('click', loadProgress);
+    document.getElementById('exportProgressBtn').addEventListener('click', exportProgress);
+    document.getElementById('resetProgressBtn').addEventListener('click', resetProgress);
+
+  </script>
+  <footer class="mt-12 text-gray-500 text-sm text-center">
+  Developed by Saide Hossain | Visit <a href="https://hacktolive.net" target="_blank" rel="noopener" class="text-green-400 hover:underline">hacktolive.net</a>
+  </footer>
+
+</body>
+</html>
